@@ -1,0 +1,116 @@
+# Smart Car Parking Controller Assignment Guide
+
+## 1. Assignment requirements
+
+The implementation follows the attached UGEA2353 assignment guideline:
+
+- Language: Verilog or SystemVerilog; this solution uses SystemVerilog.
+- Parking capacity: maximum 10 vehicles.
+- Required inputs: `clk`, `reset`, `car_in`, `car_out`, `ticket_valid`, and `payment_done`.
+- Required outputs: `gate_in`, `gate_out`, `parking_full`, `available_led`, `alarm`, and `display_update`.
+- Required FSM states: `IDLE`, `CHECK_ENTRY`, `OPEN_ENTRY_GATE`, `UPDATE_ENTRY`, `CHECK_EXIT`, `OPEN_EXIT_GATE`, `UPDATE_EXIT`, `PARKING_FULL`, and `ERROR`.
+- Required synthesizable modules: Parking FSM Controller, Vehicle Counter, Display Controller, and Top Module.
+- Verification: all 12 functional test cases listed in Section 5 are included in the self-checking testbench.
+
+## 2. Design architecture
+
+The design follows the lecture's hierarchical and FSM coding practices:
+
+1. `parking_fsm_controller` contains a state register, combinational next-state logic, and Moore output logic.
+2. `vehicle_counter` maintains a saturating occupancy count from 0 through 10 and produces the full/empty flags.
+3. `display_controller` turns on `available_led` whenever the parking lot is not full.
+4. `smart_parking_top` structurally instantiates and connects the three component modules.
+
+Sequential blocks use `always_ff` with nonblocking assignments. Combinational blocks use `always_comb` with blocking assignments and safe default values, preventing unintended latches.
+
+## 3. Operational assumptions
+
+- `reset` is active-high and asynchronous, as specified in the assignment.
+- A ticket is sampled in `CHECK_ENTRY`; payment is sampled in `CHECK_EXIT`.
+- Sensors may be deasserted after the controller enters the corresponding check state.
+- Entrance and exit gates open for one FSM state/cycle.
+- Occupancy changes once in `UPDATE_ENTRY` or `UPDATE_EXIT`.
+- An invalid ticket, incomplete payment, or an exit request while empty enters `ERROR` for one cycle and raises `alarm`.
+- An entry request while full enters `PARKING_FULL` for one cycle, keeps the entrance gate closed, and raises `alarm`.
+- If `car_in` and `car_out` are asserted simultaneously, exit has priority. This deterministic safety policy avoids opening both barriers together and is tested in TC9.
+- The counter saturates at 0 and 10, so invalid requests cannot cause underflow or overflow.
+
+## 4. FSM state/transition summary
+
+| Current state | Condition | Next state | Main output/action |
+|---|---|---|---|
+| `IDLE` | `car_out=1` | `CHECK_EXIT` | Exit priority |
+| `IDLE` | `car_out=0`, `car_in=1` | `CHECK_ENTRY` | Begin entry check |
+| `IDLE` | No request | `IDLE` | Gates closed |
+| `CHECK_ENTRY` | Lot full | `PARKING_FULL` | Reject entry |
+| `CHECK_ENTRY` | Space available, invalid ticket | `ERROR` | Raise alarm |
+| `CHECK_ENTRY` | Space available, valid ticket | `OPEN_ENTRY_GATE` | Accept entry |
+| `OPEN_ENTRY_GATE` | Always | `UPDATE_ENTRY` | `gate_in=1` |
+| `UPDATE_ENTRY` | Always | `IDLE` | Increment and update display |
+| `CHECK_EXIT` | Empty or payment incomplete | `ERROR` | Raise alarm |
+| `CHECK_EXIT` | Occupied and payment complete | `OPEN_EXIT_GATE` | Accept exit |
+| `OPEN_EXIT_GATE` | Always | `UPDATE_EXIT` | `gate_out=1` |
+| `UPDATE_EXIT` | Always | `IDLE` | Decrement and update display |
+| `PARKING_FULL` | Always | `IDLE` | `alarm=1` |
+| `ERROR` | Always | `IDLE` | `alarm=1` |
+
+State encoding for waveform analysis:
+
+| Value | State |
+|---:|---|
+| 0 | `IDLE` |
+| 1 | `CHECK_ENTRY` |
+| 2 | `OPEN_ENTRY_GATE` |
+| 3 | `UPDATE_ENTRY` |
+| 4 | `CHECK_EXIT` |
+| 5 | `OPEN_EXIT_GATE` |
+| 6 | `UPDATE_EXIT` |
+| 7 | `PARKING_FULL` |
+| 8 | `ERROR` |
+
+## 5. Testbench coverage
+
+The self-checking `tb_smart_parking.sv` verifies:
+
+1. TC1 - Reset system.
+2. TC2 - Single vehicle enters.
+3. TC3 - Multiple vehicles enter.
+4. TC4 - Parking reaches maximum capacity.
+5. TC5 - Vehicle is denied when full.
+6. TC6 - One vehicle exits.
+7. TC7 - Multiple vehicles exit.
+8. TC8 - A vehicle attempts to exit while the parking lot is empty.
+9. TC9 - Simultaneous entry and exit, using the documented exit-priority policy.
+10. TC10 - Invalid ticket.
+11. TC11 - Asynchronous reset during operation.
+12. TC12 - Continuous valid entry/exit traffic.
+
+The testbench generates `smart_parking.vcd`, performs automatic checks, prints a pass/fail summary, and calls `$fatal` if any check fails.
+
+## 6. Running in EDA Playground
+
+1. Select **SystemVerilog/Verilog**.
+2. Select a SystemVerilog simulator such as **Synopsys VCS** or **Aldec Riviera Pro**.
+3. Put `smart_parking_design.sv` in the Design pane.
+4. Put `tb_smart_parking.sv` in the Testbench pane.
+5. Enable **Open EPWave after run**.
+6. Run the simulation and confirm the console reports `ALL 12 REQUIRED FUNCTIONAL TEST CASES PASSED`.
+7. Add these signals to EPWave: `clk`, `reset`, all six inputs, all six outputs, `dut.state_debug`, and `dut.occupancy_count`.
+
+## 7. Waveform discussion checklist
+
+For each test case, discuss:
+
+- the current FSM state and state transition;
+- the input change that caused the transition;
+- the gate and alarm response;
+- the occupancy counter before and after the request;
+- `parking_full` and `available_led` behavior;
+- the one-cycle `display_update` pulse; and
+- the timing relationship between clock edges, state changes, gate operation, and counter updates.
+
+## 8. Files
+
+- `smart_parking_design.sv`: all four synthesizable modules.
+- `tb_smart_parking.sv`: self-checking testbench for the 12 required cases.
+- `assignment_guideline.md`: requirements, assumptions, FSM summary, and simulation instructions.
