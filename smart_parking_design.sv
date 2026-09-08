@@ -107,21 +107,21 @@ module parking_fsm_controller (
 
         case (state)
             OPEN_ENTRY_GATE: begin
-                gate_in = 1'b1;
+                gate_in         = 1'b1;
+                increment_count = 1'b1;
             end
 
             UPDATE_ENTRY: begin
-                increment_count = 1'b1;
-                display_update  = 1'b1;
+                display_update = 1'b1;
             end
 
             OPEN_EXIT_GATE: begin
-                gate_out = 1'b1;
+                gate_out        = 1'b1;
+                decrement_count = 1'b1;
             end
 
             UPDATE_EXIT: begin
-                decrement_count = 1'b1;
-                display_update  = 1'b1;
+                display_update = 1'b1;
             end
 
             PARKING_FULL,
