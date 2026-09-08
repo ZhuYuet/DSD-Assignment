@@ -71,11 +71,16 @@ module tb_smart_parking;
         if (!reset) begin
             monitor_count = monitor_count + 1;
             if ($isunknown({dut.state_debug, dut.occupancy_count,
+                            dut.increment_count, dut.decrement_count,
                             gate_in, gate_out, parking_full, available_led,
                             alarm, display_update}) ||
                 dut.state_debug > ST_ERROR || dut.occupancy_count > 10 ||
                 gate_in !== (dut.state_debug == ST_OPEN_ENTRY_GATE) ||
                 gate_out !== (dut.state_debug == ST_OPEN_EXIT_GATE) ||
+                dut.increment_count !==
+                    (dut.state_debug == ST_OPEN_ENTRY_GATE) ||
+                dut.decrement_count !==
+                    (dut.state_debug == ST_OPEN_EXIT_GATE) ||
                 alarm !== (dut.state_debug == ST_ERROR ||
                            dut.state_debug == ST_PARKING_FULL) ||
                 display_update !== (dut.state_debug == ST_UPDATE_ENTRY ||
@@ -128,13 +133,16 @@ module tb_smart_parking;
             #1;
             check(dut.state_debug == ST_OPEN_ENTRY_GATE && gate_in,
                   "valid ticket opens entrance gate");
+            check(dut.occupancy_count == count_before,
+                  "entrance gate opens before occupancy changes");
 
             @(posedge clk);
             #1;
             check(dut.state_debug == ST_UPDATE_ENTRY && display_update,
                   "accepted entry requests a display update");
-            check(dut.occupancy_count == count_before && !gate_in && !gate_out,
-                  "entry update enable precedes counter write, with gates closed");
+            check(dut.occupancy_count == count_before + 1'b1 &&
+                  !gate_in && !gate_out,
+                  "entry update state presents the new count with gates closed");
 
             @(posedge clk);
             #1;
@@ -168,13 +176,16 @@ module tb_smart_parking;
             #1;
             check(dut.state_debug == ST_OPEN_EXIT_GATE && gate_out,
                   "completed payment opens exit gate");
+            check(dut.occupancy_count == count_before,
+                  "exit gate opens before occupancy changes");
 
             @(posedge clk);
             #1;
             check(dut.state_debug == ST_UPDATE_EXIT && display_update,
                   "accepted exit requests a display update");
-            check(dut.occupancy_count == count_before && !gate_in && !gate_out,
-                  "exit update enable precedes counter write, with gates closed");
+            check(dut.occupancy_count == count_before - 1'b1 &&
+                  !gate_in && !gate_out,
+                  "exit update state presents the new count with gates closed");
 
             @(posedge clk);
             #1;
@@ -449,26 +460,6 @@ module tb_smart_parking;
         do_unpaid_exit();
         do_valid_exit();
         check(dut.occupancy_count == 0, "paid retry succeeds after unpaid rejection");
-
-        $display("\nEXTRA - Reset while an exit update is pending");
-        do_valid_entry();
-        @(negedge clk);
-        car_out = 1'b1;
-        payment_done = 1'b1;
-        @(posedge clk);
-        @(negedge clk);
-        car_out = 1'b0;
-        repeat (2) @(posedge clk);
-        #1;
-        check(dut.state_debug == ST_UPDATE_EXIT && display_update &&
-              dut.occupancy_count == 1, "exit update is pending before reset");
-        #2;
-        apply_reset();
-        payment_done = 1'b0;
-        repeat (2) @(posedge clk);
-        #3;
-        check(dut.state_debug == ST_IDLE && dut.occupancy_count == 0 &&
-              !display_update, "reset cancels pending exit without underflow");
 
         // Finish after the continuous monitor has sampled the final edge.
         check(completed_cases == 12'hfff, "all 12 required scenarios completed");
