@@ -29,13 +29,13 @@ Sequential blocks use `always_ff` with nonblocking assignments. Combinational bl
 - A ticket is sampled in `CHECK_ENTRY`; payment is sampled in `CHECK_EXIT`.
 - Sensors are synchronous request levels and may be deasserted after the controller enters the corresponding check state. Requests asserted only while the FSM is busy are not queued. A sensor held high on a later visit to `IDLE` is treated as another request. Physical sensor synchronization, debounce, and one-request-per-vehicle conditioning are outside this assignment model.
 - Entrance and exit gates open for one FSM state/cycle.
-- In `UPDATE_ENTRY` or `UPDATE_EXIT`, the FSM asserts the counter enable and `display_update`. Occupancy changes once at the rising edge **leaving** that state, when the FSM returns to `IDLE`. The full/available indicators then follow the new count.
+- During `OPEN_ENTRY_GATE` or `OPEN_EXIT_GATE`, the FSM asserts the corresponding counter enable. Occupancy changes once at the rising edge that enters `UPDATE_ENTRY` or `UPDATE_EXIT`. In the update state, `display_update` is high while the new count and full/available indicators are already available.
 - An invalid ticket, incomplete payment, or an exit request while empty enters `ERROR` for one cycle and raises `alarm`.
 - An entry request while full enters `PARKING_FULL` for one cycle, keeps the entrance gate closed, and raises `alarm`.
 - If `car_in` and `car_out` are asserted simultaneously, exit has priority. This arbitration choice avoids opening both barriers together and is tested in TC9. The entry request is not queued: it must remain asserted or be retried when the controller returns to `IDLE`. An empty-lot or unpaid exit still takes priority and produces `ERROR`; there is no automatic fallback to entry.
 - The counter saturates at 0 and 10, so invalid requests cannot cause underflow or overflow.
 
-The PDF does not prescribe reset polarity, arbitration, request queuing, gate-open duration, or exact display-update timing. These are implementation assumptions, not additional lecturer requirements. Here `display_update` is an update-request strobe, not a registered indication that the updated count is already available. A future clocked display register would need to account for that timing.
+The PDF does not prescribe reset polarity, arbitration, request queuing, gate-open duration, or exact display-update timing. These are implementation assumptions, not additional lecturer requirements. Here `display_update` is a one-cycle strobe that accompanies the updated occupancy value.
 
 ## 4. FSM state/transition summary
 
@@ -47,12 +47,12 @@ The PDF does not prescribe reset polarity, arbitration, request queuing, gate-op
 | `CHECK_ENTRY` | Lot full | `PARKING_FULL` | Reject entry |
 | `CHECK_ENTRY` | Space available, invalid ticket | `ERROR` | Raise alarm |
 | `CHECK_ENTRY` | Space available, valid ticket | `OPEN_ENTRY_GATE` | Accept entry |
-| `OPEN_ENTRY_GATE` | Always | `UPDATE_ENTRY` | `gate_in=1` |
-| `UPDATE_ENTRY` | Always | `IDLE` | Increment and update display |
+| `OPEN_ENTRY_GATE` | Always | `UPDATE_ENTRY` | `gate_in=1`; increment at next edge |
+| `UPDATE_ENTRY` | Always | `IDLE` | Present new count and update display |
 | `CHECK_EXIT` | Empty or payment incomplete | `ERROR` | Raise alarm |
 | `CHECK_EXIT` | Occupied and payment complete | `OPEN_EXIT_GATE` | Accept exit |
-| `OPEN_EXIT_GATE` | Always | `UPDATE_EXIT` | `gate_out=1` |
-| `UPDATE_EXIT` | Always | `IDLE` | Decrement and update display |
+| `OPEN_EXIT_GATE` | Always | `UPDATE_EXIT` | `gate_out=1`; decrement at next edge |
+| `UPDATE_EXIT` | Always | `IDLE` | Present new count and update display |
 | `PARKING_FULL` | Always | `IDLE` | `alarm=1` |
 | `ERROR` | Always | `IDLE` | `alarm=1` |
 
@@ -87,7 +87,7 @@ The self-checking `tb_smart_parking.sv` verifies:
 11. TC11 - Asynchronous reset while the entry gate is open, starting with two vehicles; verifies immediate counter clearing and no delayed entry after release.
 12. TC12 - Continuous valid entry/exit traffic.
 
-Additional checks cover an unpaid exit from an occupied lot, a successful paid retry, and asynchronous reset while an exit update is pending. A continuous monitor checks state/count range, unknown values, gate exclusivity and state decoding, alarm/display strobes, and full/available indications after each rising edge. Directed checks verify count and one-cycle control timing. These are simulation checks, not exhaustive formal verification; a two-state simulator cannot establish four-state X/Z behavior.
+Additional checks cover an unpaid exit from an occupied lot and a successful paid retry. A continuous monitor checks state/count range, unknown values, gate exclusivity and state decoding, alarm/display strobes, and full/available indications after each rising edge. Directed checks verify count and one-cycle control timing. These are simulation checks, not exhaustive formal verification; a two-state simulator cannot establish four-state X/Z behavior.
 
 The testbench generates `smart_parking.vcd`, tracks completion of all 12 required scenarios, prints a pass/fail summary, and calls `$fatal` if any check fails. A watchdog aborts a stalled run. The pass count counts individual assertions, not test cases.
 
@@ -129,8 +129,8 @@ For an accepted entry with initial occupancy `N`, values after successive rising
 |---|---|---:|---:|---:|
 | Request sampled | `CHECK_ENTRY` | 0 | 0 | N |
 | Ticket accepted | `OPEN_ENTRY_GATE` | 1 | 0 | N |
-| Gate cycle ends | `UPDATE_ENTRY` | 0 | 1 | N |
-| Update committed | `IDLE` | 0 | 0 | N + 1 |
+| Gate cycle ends; count updates | `UPDATE_ENTRY` | 0 | 1 | N + 1 |
+| Return to waiting | `IDLE` | 0 | 0 | N + 1 |
 
 An accepted exit follows the same timing using exit states and `N - 1`. Reset can interrupt either sequence between clock edges.
 
