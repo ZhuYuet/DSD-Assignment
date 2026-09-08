@@ -153,18 +153,16 @@ The stated submission deadline is **5:00 pm, Friday, 18 September 2026**, by ema
 - `tb_smart_parking.sv`: self-checking testbench for the 12 required cases.
 - `assignment_guideline.md`: requirements, assumptions, FSM summary, and simulation instructions.
 
-## 10. Review and local verification record (8 September 2026)
+## 10. Current review status (8 September 2026)
 
 Baseline reviewed: commit `edb529987a6199b4a1a0a6b4abf907e96295f79c`.
 
 | Check | Result |
 |---|---|
-| Required interfaces, four modules, nine states, capacity and asynchronous reset | Present in RTL; no functional RTL change identified by this review |
-| Original testbench, local Verilator simulation | 178 individual checks passed, 0 failed |
-| Strengthened testbench, local Verilator simulation | 280 individual checks passed, 0 failed; all TC1-TC12 completed |
-| Continuous control/indicator/range monitor | 154 clock samples, no violations |
-| Compiler diagnostics | Two existing `WIDTHEXPAND` warnings: the unsigned 4-bit count is extended for comparison with the 32-bit capacity parameter; correct for the configured capacity of 10 |
-| EDA Playground simulation and report waveforms | Still required; not executed as part of this local review |
+| Required interfaces, four modules, nine states, capacity and asynchronous reset | Present in RTL |
+| Occupancy/display timing | Revised so the new count is available while `display_update` is high |
+| Required testbench coverage | TC1-TC12 are present with directed checks and a continuous invariant monitor |
+| EDA Playground simulation and report waveforms | Pending; collect these before treating the revised code as verified |
 | Synthesis, physical timing and power measurements | Not performed |
 
-The RTL is unchanged. Changes strengthen verification and distinguish lecturer requirements from implementation assumptions. Simulation success establishes the exercised cases, not exhaustive correctness or a guaranteed assignment mark.
+The review branch contains the proposed RTL and testbench changes. Merge it into `main` only after the revised files pass the required EDA Playground simulation.
