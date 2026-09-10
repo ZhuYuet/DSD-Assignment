@@ -3,8 +3,10 @@
 // UGEA2353 Digital System Design Assignment
 // Smart Car Parking Controller
 
+// =============================================================================
 // Module 1: Parking FSM Controller
 // Implements the nine states required by the assignment guideline.
+// =============================================================================
 module parking_fsm_controller (
     input  logic       clk,
     input  logic       reset,
@@ -23,6 +25,9 @@ module parking_fsm_controller (
     output logic [3:0] state_debug
 );
 
+    // -------------------------------------------------------------------------
+    // State encoding and state signals
+    // -------------------------------------------------------------------------
     typedef enum logic [3:0] {
         IDLE            = 4'd0,
         CHECK_ENTRY     = 4'd1,
@@ -37,6 +42,9 @@ module parking_fsm_controller (
 
     state_t state, next_state;
 
+    // -------------------------------------------------------------------------
+    // State register
+    // -------------------------------------------------------------------------
     // State register with the asynchronous reset required by the guideline.
     always_ff @(posedge clk or posedge reset) begin
         if (reset)
@@ -45,6 +53,9 @@ module parking_fsm_controller (
             state <= next_state;
     end
 
+    // -------------------------------------------------------------------------
+    // Combinational next-state logic
+    // -------------------------------------------------------------------------
     // Next-state logic. When both sensors are active, exit has priority.
     always_comb begin
         next_state = state;
@@ -96,6 +107,9 @@ module parking_fsm_controller (
         endcase
     end
 
+    // -------------------------------------------------------------------------
+    // Moore output logic
+    // -------------------------------------------------------------------------
     // Moore output logic: outputs depend only on the current state.
     always_comb begin
         gate_in         = 1'b0;
@@ -135,13 +149,16 @@ module parking_fsm_controller (
         endcase
     end
 
+    // Expose the encoded state for simulation and waveform analysis.
     assign state_debug = state;
 
 endmodule
 
 
+// =============================================================================
 // Module 2: Vehicle Counter
 // Counts accepted entries/exits and prevents overflow or underflow.
+// =============================================================================
 module vehicle_counter #(
     parameter int unsigned MAX_CAPACITY = 10,
     parameter int unsigned COUNT_WIDTH  = 4
@@ -155,6 +172,9 @@ module vehicle_counter #(
     output logic                   parking_empty
 );
 
+    // -------------------------------------------------------------------------
+    // Sequential occupancy counter
+    // -------------------------------------------------------------------------
     always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             occupancy_count <= '0;
@@ -177,14 +197,19 @@ module vehicle_counter #(
         end
     end
 
+    // -------------------------------------------------------------------------
+    // Capacity status logic
+    // -------------------------------------------------------------------------
     assign parking_full  = (occupancy_count >= MAX_CAPACITY);
     assign parking_empty = (occupancy_count == 0);
 
 endmodule
 
 
+// =============================================================================
 // Module 3: Display Controller
 // Drives the parking-available status LED.
+// =============================================================================
 module display_controller (
     input  logic parking_full,
     output logic available_led
@@ -197,8 +222,10 @@ module display_controller (
 endmodule
 
 
+// =============================================================================
 // Module 4: Top Module
 // Integrates the FSM, counter, and display controller.
+// =============================================================================
 module smart_parking_top (
     input  logic clk,
     input  logic reset,
@@ -214,12 +241,18 @@ module smart_parking_top (
     output logic display_update
 );
 
+    // -------------------------------------------------------------------------
+    // Internal connections between modules
+    // -------------------------------------------------------------------------
     logic       increment_count;
     logic       decrement_count;
     logic       parking_empty;
     logic [3:0] occupancy_count;
     logic [3:0] state_debug;
 
+    // -------------------------------------------------------------------------
+    // Parking FSM controller instance
+    // -------------------------------------------------------------------------
     parking_fsm_controller fsm_controller (
         .clk             (clk),
         .reset           (reset),
@@ -238,6 +271,9 @@ module smart_parking_top (
         .state_debug     (state_debug)
     );
 
+    // -------------------------------------------------------------------------
+    // Vehicle counter instance
+    // -------------------------------------------------------------------------
     vehicle_counter #(
         .MAX_CAPACITY (10),
         .COUNT_WIDTH  (4)
@@ -251,6 +287,9 @@ module smart_parking_top (
         .parking_empty   (parking_empty)
     );
 
+    // -------------------------------------------------------------------------
+    // Display controller instance
+    // -------------------------------------------------------------------------
     display_controller display (
         .parking_full  (parking_full),
         .available_led (available_led)
