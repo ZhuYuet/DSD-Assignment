@@ -1,7 +1,13 @@
 `timescale 1ns/1ps
 
+// =============================================================================
+// Smart Parking Controller Testbench
+// =============================================================================
 module tb_smart_parking;
 
+    // -------------------------------------------------------------------------
+    // DUT input signals
+    // -------------------------------------------------------------------------
     logic clk;
     logic reset;
     logic car_in;
@@ -9,6 +15,9 @@ module tb_smart_parking;
     logic ticket_valid;
     logic payment_done;
 
+    // -------------------------------------------------------------------------
+    // DUT output signals
+    // -------------------------------------------------------------------------
     logic gate_in;
     logic gate_out;
     logic parking_full;
@@ -16,6 +25,9 @@ module tb_smart_parking;
     logic alarm;
     logic display_update;
 
+    // -------------------------------------------------------------------------
+    // FSM state encodings used for verification
+    // -------------------------------------------------------------------------
     localparam logic [3:0] ST_IDLE            = 4'd0;
     localparam logic [3:0] ST_CHECK_ENTRY     = 4'd1;
     localparam logic [3:0] ST_OPEN_ENTRY_GATE = 4'd2;
@@ -26,11 +38,17 @@ module tb_smart_parking;
     localparam logic [3:0] ST_PARKING_FULL    = 4'd7;
     localparam logic [3:0] ST_ERROR           = 4'd8;
 
+    // -------------------------------------------------------------------------
+    // Test result and coverage tracking
+    // -------------------------------------------------------------------------
     integer pass_count;
     integer fail_count;
     integer monitor_count;
     logic [11:0] completed_cases;
 
+    // -------------------------------------------------------------------------
+    // Device under test
+    // -------------------------------------------------------------------------
     smart_parking_top dut (
         .clk            (clk),
         .reset          (reset),
@@ -46,12 +64,18 @@ module tb_smart_parking;
         .display_update (display_update)
     );
 
+    // -------------------------------------------------------------------------
+    // Clock generation
+    // -------------------------------------------------------------------------
     // 10 ns clock period.
     initial begin
         clk = 1'b0;
         forever #5 clk = ~clk;
     end
 
+    // -------------------------------------------------------------------------
+    // Reusable pass/fail checker
+    // -------------------------------------------------------------------------
     task automatic check(input logic condition, input string message);
         begin
             if (condition === 1'b1) begin
@@ -64,6 +88,9 @@ module tb_smart_parking;
         end
     endtask
 
+    // -------------------------------------------------------------------------
+    // Continuous design invariant monitor
+    // -------------------------------------------------------------------------
     // Check all externally visible controls after each rising edge settles.
     // A violation fails even if the directed test does not sample that output.
     always @(posedge clk) begin
@@ -91,12 +118,20 @@ module tb_smart_parking;
         end
     end
 
+    // -------------------------------------------------------------------------
+    // Simulation timeout watchdog
+    // -------------------------------------------------------------------------
     // Prevent a stalled stimulus or missing clock from appearing to pass.
     initial begin
         #100000;
         $fatal(1, "TESTBENCH TIMEOUT");
     end
 
+    // -------------------------------------------------------------------------
+    // Reusable stimulus tasks
+    // -------------------------------------------------------------------------
+
+    // Apply the asynchronous reset and verify the reset condition.
     task automatic apply_reset;
         begin
             reset = 1'b1;
@@ -113,6 +148,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Complete one authorised entrance sequence.
     task automatic do_valid_entry;
         logic [3:0] count_before;
         begin
@@ -156,6 +192,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Complete one authorised exit sequence.
     task automatic do_valid_exit;
         logic [3:0] count_before;
         begin
@@ -199,6 +236,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Attempt an entry using an invalid ticket.
     task automatic do_invalid_ticket;
         logic [3:0] count_before;
         begin
@@ -229,6 +267,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Attempt an entry after the counter has reached maximum capacity.
     task automatic do_entry_when_full;
         begin
             @(negedge clk);
@@ -257,6 +296,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Attempt an exit while the occupancy counter is zero.
     task automatic do_exit_when_empty;
         begin
             @(negedge clk);
@@ -284,6 +324,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Assert both vehicle sensors and verify the documented exit priority.
     task automatic do_simultaneous_request;
         logic [3:0] count_before;
         begin
@@ -323,6 +364,7 @@ module tb_smart_parking;
         end
     endtask
 
+    // Attempt an exit without payment, then verify safe recovery.
     task automatic do_unpaid_exit;
         logic [3:0] count_before;
         begin
@@ -350,7 +392,13 @@ module tb_smart_parking;
         end
     endtask
 
+    // -------------------------------------------------------------------------
+    // Main test sequence
+    // -------------------------------------------------------------------------
     initial begin
+        // ---------------------------------------------------------------------
+        // Initial signal values and waveform recording
+        // ---------------------------------------------------------------------
         pass_count    = 0;
         fail_count    = 0;
         monitor_count = 0;
@@ -364,6 +412,9 @@ module tb_smart_parking;
         $dumpfile("smart_parking.vcd");
         $dumpvars(0, tb_smart_parking);
 
+        // ---------------------------------------------------------------------
+        // Required assignment test cases TC1-TC12
+        // ---------------------------------------------------------------------
         $display("\nTC1 - Reset system");
         apply_reset();
         check(available_led && !parking_full, "empty parking lot indicates availability");
@@ -456,6 +507,9 @@ module tb_smart_parking;
         check(!alarm, "continuous valid traffic finishes without alarm");
         completed_cases[11] = 1'b1;
 
+        // ---------------------------------------------------------------------
+        // Additional robustness test
+        // ---------------------------------------------------------------------
         $display("\nEXTRA - Incomplete payment and recovery");
         do_unpaid_exit();
         do_valid_exit();
@@ -465,6 +519,9 @@ module tb_smart_parking;
         check(completed_cases == 12'hfff, "all 12 required scenarios completed");
         check(monitor_count > 0, "continuous monitor sampled the simulation");
 
+        // ---------------------------------------------------------------------
+        // Final pass/fail summary
+        // ---------------------------------------------------------------------
         $display("\n============================================================");
         $display("TEST SUMMARY: %0d passed, %0d failed", pass_count, fail_count);
         $display("CONTINUOUS MONITOR: %0d clock samples", monitor_count);
