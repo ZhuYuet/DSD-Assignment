@@ -383,6 +383,144 @@ module tb_smart_parking;
         end
     endtask
 
+    // Accept the valid entry while blocking an unpaid simultaneous exit.
+    task automatic do_simultaneous_entry_only;
+        logic [3:0] count_before;
+        begin
+            count_before = dut.occupancy_count;
+            check(count_before < 10,
+                  "entry-only simultaneous test starts with available space");
+
+            @(negedge clk);
+            car_in       = 1'b1;
+            car_out      = 1'b1;
+            ticket_valid = 1'b1;
+            payment_done = 1'b0;
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_CHECK_BOTH,
+                  "valid-entry/unpaid-exit request reaches CHECK_BOTH");
+
+            @(negedge clk);
+            car_in  = 1'b0;
+            car_out = 1'b0;
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_OPEN_ENTRY_GATE &&
+                  gate_in && !gate_out &&
+                  dut.increment_count && !dut.decrement_count,
+                  "valid entry proceeds while unpaid exit remains blocked");
+            check(dut.occupancy_count == count_before,
+                  "entry-only path opens the gate before changing the count");
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_UPDATE_ENTRY && display_update,
+                  "entry-only simultaneous path reaches UPDATE_ENTRY");
+            check(dut.occupancy_count == count_before + 1'b1,
+                  "entry-only simultaneous path increments occupancy once");
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_IDLE,
+                  "entry-only simultaneous path returns to IDLE");
+
+            ticket_valid = 1'b0;
+            payment_done = 1'b0;
+        end
+    endtask
+
+    // Block the invalid entry while accepting a paid simultaneous exit.
+    task automatic do_simultaneous_exit_only;
+        logic [3:0] count_before;
+        begin
+            count_before = dut.occupancy_count;
+            check(count_before > 0,
+                  "exit-only simultaneous test starts with an occupied lot");
+
+            @(negedge clk);
+            car_in       = 1'b1;
+            car_out      = 1'b1;
+            ticket_valid = 1'b0;
+            payment_done = 1'b1;
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_CHECK_BOTH,
+                  "invalid-entry/paid-exit request reaches CHECK_BOTH");
+
+            @(negedge clk);
+            car_in  = 1'b0;
+            car_out = 1'b0;
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_OPEN_EXIT_GATE &&
+                  !gate_in && gate_out &&
+                  !dut.increment_count && dut.decrement_count,
+                  "paid exit proceeds while invalid entry remains blocked");
+            check(dut.occupancy_count == count_before,
+                  "exit-only path opens the gate before changing the count");
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_UPDATE_EXIT && display_update,
+                  "exit-only simultaneous path reaches UPDATE_EXIT");
+            check(dut.occupancy_count == count_before - 1'b1,
+                  "exit-only simultaneous path decrements occupancy once");
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_IDLE,
+                  "exit-only simultaneous path returns to IDLE");
+
+            ticket_valid = 1'b0;
+            payment_done = 1'b0;
+        end
+    endtask
+
+    // Ensure an unpaid exit cannot make room for an entry when already full.
+    task automatic do_full_simultaneous_unpaid;
+        begin
+            check(dut.occupancy_count == 10 && parking_full,
+                  "full simultaneous rejection starts at capacity");
+
+            @(negedge clk);
+            car_in       = 1'b1;
+            car_out      = 1'b1;
+            ticket_valid = 1'b1;
+            payment_done = 1'b0;
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_CHECK_BOTH,
+                  "full valid-entry/unpaid-exit request reaches CHECK_BOTH");
+
+            @(negedge clk);
+            car_in  = 1'b0;
+            car_out = 1'b0;
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_ERROR && alarm,
+                  "full lot rejects entry when the simultaneous exit is unpaid");
+            check(!gate_in && !gate_out &&
+                  !dut.increment_count && !dut.decrement_count,
+                  "full partial request keeps both gates and count enables off");
+
+            @(posedge clk);
+            #1;
+            check(dut.state_debug == ST_IDLE &&
+                  dut.occupancy_count == 10 && parking_full,
+                  "full partial rejection preserves the capacity limit");
+
+            ticket_valid = 1'b0;
+            payment_done = 1'b0;
+        end
+    endtask
+
     // Attempt an exit without payment, then verify safe recovery.
     task automatic do_unpaid_exit;
         logic [3:0] count_before;
@@ -457,6 +595,8 @@ module tb_smart_parking;
 
         $display("\nTC5 - Vehicle denied when full");
         do_entry_when_full();
+        $display("\nEXTRA - Full lot with valid entry and unpaid simultaneous exit");
+        do_full_simultaneous_unpaid();
         completed_cases[4] = 1'b1;
 
         $display("\nTC6 - Vehicle exits");
@@ -479,8 +619,12 @@ module tb_smart_parking;
         $display("\nTC9 - Simultaneous entry and exit");
         do_valid_entry();
         do_simultaneous_request();
+        $display("\nEXTRA - Valid entry with unpaid simultaneous exit");
+        do_simultaneous_entry_only();
+        $display("\nEXTRA - Invalid entry with paid simultaneous exit");
+        do_simultaneous_exit_only();
         check(dut.occupancy_count == 1,
-              "simultaneous entry and exit preserve occupancy at one");
+              "simultaneous routing scenarios finish with expected occupancy");
         completed_cases[8] = 1'b1;
 
         $display("\nTC10 - Invalid ticket");

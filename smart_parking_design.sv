@@ -59,7 +59,8 @@ module parking_fsm_controller (
     // -------------------------------------------------------------------------
     // Combinational next-state logic
     // -------------------------------------------------------------------------
-    // Next-state logic. When both sensors are active, exit has priority.
+    // Next-state logic. Simultaneous requests are validated independently so
+    // that one valid movement can proceed while the other remains blocked.
     always_comb begin
         next_state = state;
 
@@ -102,10 +103,25 @@ module parking_fsm_controller (
                 next_state = IDLE;
 
             CHECK_BOTH: begin
-                if (parking_empty || !ticket_valid || !payment_done)
-                    next_state = ERROR;
-                else
+                // Both movements are valid. This remains safe even when the
+                // lot is full because one entry and one exit give no net gain.
+                if (ticket_valid && payment_done && !parking_empty)
                     next_state = OPEN_BOTH_GATES;
+
+                // The entry is valid but the exit is unpaid or impossible
+                // because the lot is empty. Never admit an entry-only request
+                // when the lot is full.
+                else if (ticket_valid && !parking_full &&
+                         (!payment_done || parking_empty))
+                    next_state = OPEN_ENTRY_GATE;
+
+                // The entry ticket is invalid, but a paid exit from an
+                // occupied lot may still proceed.
+                else if (!ticket_valid && payment_done && !parking_empty)
+                    next_state = OPEN_EXIT_GATE;
+
+                else
+                    next_state = ERROR;
             end
 
             OPEN_BOTH_GATES:
