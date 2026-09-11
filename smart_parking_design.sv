@@ -5,7 +5,7 @@
 
 // =============================================================================
 // Module 1: Parking FSM Controller
-// Implements the nine states required by the assignment guideline.
+// Implements nine required states plus three simultaneous-traffic states.
 // =============================================================================
 module parking_fsm_controller (
     input  logic       clk,
@@ -37,7 +37,10 @@ module parking_fsm_controller (
         OPEN_EXIT_GATE  = 4'd5,
         UPDATE_EXIT     = 4'd6,
         PARKING_FULL    = 4'd7,
-        ERROR           = 4'd8
+        ERROR           = 4'd8,
+        CHECK_BOTH      = 4'd9,
+        OPEN_BOTH_GATES = 4'd10,
+        UPDATE_BOTH     = 4'd11
     } state_t;
 
     state_t state, next_state;
@@ -62,7 +65,9 @@ module parking_fsm_controller (
 
         case (state)
             IDLE: begin
-                if (car_out)
+                if (car_in && car_out)
+                    next_state = CHECK_BOTH;
+                else if (car_out)
                     next_state = CHECK_EXIT;
                 else if (car_in)
                     next_state = CHECK_ENTRY;
@@ -94,6 +99,19 @@ module parking_fsm_controller (
                 next_state = UPDATE_EXIT;
 
             UPDATE_EXIT:
+                next_state = IDLE;
+
+            CHECK_BOTH: begin
+                if (parking_empty || !ticket_valid || !payment_done)
+                    next_state = ERROR;
+                else
+                    next_state = OPEN_BOTH_GATES;
+            end
+
+            OPEN_BOTH_GATES:
+                next_state = UPDATE_BOTH;
+
+            UPDATE_BOTH:
                 next_state = IDLE;
 
             PARKING_FULL:
@@ -135,6 +153,17 @@ module parking_fsm_controller (
             end
 
             UPDATE_EXIT: begin
+                display_update = 1'b1;
+            end
+
+            OPEN_BOTH_GATES: begin
+                gate_in         = 1'b1;
+                gate_out        = 1'b1;
+                increment_count = 1'b1;
+                decrement_count = 1'b1;
+            end
+
+            UPDATE_BOTH: begin
                 display_update = 1'b1;
             end
 
@@ -188,6 +217,11 @@ module vehicle_counter #(
                 2'b01: begin
                     if (occupancy_count > 0)
                         occupancy_count <= occupancy_count - 1'b1;
+                end
+
+                2'b11: begin
+                    // One vehicle enters while another exits; net change is zero.
+                    occupancy_count <= occupancy_count;
                 end
 
                 default: begin
