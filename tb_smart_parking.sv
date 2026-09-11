@@ -37,6 +37,9 @@ module tb_smart_parking;
     localparam logic [3:0] ST_UPDATE_EXIT     = 4'd6;
     localparam logic [3:0] ST_PARKING_FULL    = 4'd7;
     localparam logic [3:0] ST_ERROR           = 4'd8;
+    localparam logic [3:0] ST_CHECK_BOTH      = 4'd9;
+    localparam logic [3:0] ST_OPEN_BOTH_GATES = 4'd10;
+    localparam logic [3:0] ST_UPDATE_BOTH     = 4'd11;
 
     // -------------------------------------------------------------------------
     // Test result and coverage tracking
@@ -101,17 +104,22 @@ module tb_smart_parking;
                             dut.increment_count, dut.decrement_count,
                             gate_in, gate_out, parking_full, available_led,
                             alarm, display_update}) ||
-                dut.state_debug > ST_ERROR || dut.occupancy_count > 10 ||
-                gate_in !== (dut.state_debug == ST_OPEN_ENTRY_GATE) ||
-                gate_out !== (dut.state_debug == ST_OPEN_EXIT_GATE) ||
+                dut.state_debug > ST_UPDATE_BOTH || dut.occupancy_count > 10 ||
+                gate_in !== (dut.state_debug == ST_OPEN_ENTRY_GATE ||
+                             dut.state_debug == ST_OPEN_BOTH_GATES) ||
+                gate_out !== (dut.state_debug == ST_OPEN_EXIT_GATE ||
+                              dut.state_debug == ST_OPEN_BOTH_GATES) ||
                 dut.increment_count !==
-                    (dut.state_debug == ST_OPEN_ENTRY_GATE) ||
+                    (dut.state_debug == ST_OPEN_ENTRY_GATE ||
+                     dut.state_debug == ST_OPEN_BOTH_GATES) ||
                 dut.decrement_count !==
-                    (dut.state_debug == ST_OPEN_EXIT_GATE) ||
+                    (dut.state_debug == ST_OPEN_EXIT_GATE ||
+                     dut.state_debug == ST_OPEN_BOTH_GATES) ||
                 alarm !== (dut.state_debug == ST_ERROR ||
                            dut.state_debug == ST_PARKING_FULL) ||
                 display_update !== (dut.state_debug == ST_UPDATE_ENTRY ||
-                                    dut.state_debug == ST_UPDATE_EXIT) ||
+                                    dut.state_debug == ST_UPDATE_EXIT ||
+                                    dut.state_debug == ST_UPDATE_BOTH) ||
                 parking_full !== (dut.occupancy_count == 10) ||
                 available_led !== (dut.occupancy_count < 10))
                 check(1'b0, "continuous control/indicator/range invariant");
@@ -324,7 +332,7 @@ module tb_smart_parking;
         end
     endtask
 
-    // Assert both vehicle sensors and verify the documented exit priority.
+    // Assert both vehicle sensors and verify concurrent entry and exit.
     task automatic do_simultaneous_request;
         logic [3:0] count_before;
         begin
@@ -338,8 +346,8 @@ module tb_smart_parking;
 
             @(posedge clk);
             #1;
-            check(dut.state_debug == ST_CHECK_EXIT,
-                  "simultaneous request applies documented exit priority");
+            check(dut.state_debug == ST_CHECK_BOTH,
+                  "simultaneous request reaches CHECK_BOTH");
 
             @(negedge clk);
             car_in  = 1'b0;
@@ -347,17 +355,28 @@ module tb_smart_parking;
 
             @(posedge clk);
             #1;
-            check(gate_out && !gate_in,
-                  "simultaneous request opens only the priority exit gate");
+            check(dut.state_debug == ST_OPEN_BOTH_GATES,
+                  "valid simultaneous request reaches OPEN_BOTH_GATES");
+            check(gate_in && gate_out &&
+                  dut.increment_count && dut.decrement_count,
+                  "simultaneous request opens both gates and enables both counts");
+            check(dut.occupancy_count == count_before,
+                  "occupancy is unchanged while both gates are open");
 
             @(posedge clk);
             #1;
-            check(dut.state_debug == ST_UPDATE_EXIT, "priority exit reaches UPDATE_EXIT");
+            check(dut.state_debug == ST_UPDATE_BOTH && display_update,
+                  "simultaneous request reaches UPDATE_BOTH");
+            check(!gate_in && !gate_out,
+                  "both gates close before the display update");
+            check(dut.occupancy_count == count_before,
+                  "one entry and one exit produce zero net occupancy change");
 
             @(posedge clk);
             #1;
-            check(dut.occupancy_count == count_before - 1'b1,
-                  "simultaneous request processes exactly one exit");
+            check(dut.state_debug == ST_IDLE &&
+                  dut.occupancy_count == count_before,
+                  "simultaneous sequence returns to IDLE with the same count");
 
             ticket_valid = 1'b0;
             payment_done = 1'b0;
@@ -460,7 +479,8 @@ module tb_smart_parking;
         $display("\nTC9 - Simultaneous entry and exit");
         do_valid_entry();
         do_simultaneous_request();
-        check(dut.occupancy_count == 0, "exit-priority scenario leaves count at zero");
+        check(dut.occupancy_count == 1,
+              "simultaneous entry and exit preserve occupancy at one");
         completed_cases[8] = 1'b1;
 
         $display("\nTC10 - Invalid ticket");
@@ -468,6 +488,7 @@ module tb_smart_parking;
         completed_cases[9] = 1'b1;
 
         $display("\nTC11 - Reset during operation");
+        apply_reset();
         repeat (2) do_valid_entry();
         check(dut.occupancy_count == 2, "mid-operation reset starts with nonzero occupancy");
         @(negedge clk);
