@@ -9,6 +9,7 @@ Requirements checked against the lecturer's **UGEA2353 DSD Assignment 2026June.p
 - Required inputs: `clk`, `reset`, `car_in`, `car_out`, `ticket_valid`, and `payment_done`.
 - Required outputs: `gate_in`, `gate_out`, `parking_full`, `available_led`, `alarm`, and `display_update`.
 - Required FSM states: `IDLE`, `CHECK_ENTRY`, `OPEN_ENTRY_GATE`, `UPDATE_ENTRY`, `CHECK_EXIT`, `OPEN_EXIT_GATE`, `UPDATE_EXIT`, `PARKING_FULL`, and `ERROR`.
+- Additional simultaneous-traffic states: `CHECK_BOTH`, `OPEN_BOTH_GATES`, and `UPDATE_BOTH`.
 - Required synthesizable modules: Parking FSM Controller, Vehicle Counter, Display Controller, and Top Module.
 - Verification: all 12 functional test cases listed in Section 5 are included in the self-checking testbench.
 
@@ -26,13 +27,14 @@ Sequential blocks use `always_ff` with nonblocking assignments. Combinational bl
 ## 3. Operational assumptions
 
 - The assignment requires an asynchronous reset; active-high polarity is a design choice.
-- A ticket is sampled in `CHECK_ENTRY`; payment is sampled in `CHECK_EXIT`.
+- A ticket is sampled in `CHECK_ENTRY`; payment is sampled in `CHECK_EXIT`; both are sampled in `CHECK_BOTH`.
 - Sensors are synchronous request levels and may be deasserted after the controller enters the corresponding check state. Requests asserted only while the FSM is busy are not queued. A sensor held high on a later visit to `IDLE` is treated as another request. Physical sensor synchronization, debounce, and one-request-per-vehicle conditioning are outside this assignment model.
-- Entrance and exit gates open for one FSM state/cycle.
+- Each gate opens for one FSM state/cycle. Both gates open together only in `OPEN_BOTH_GATES`.
 - During `OPEN_ENTRY_GATE` or `OPEN_EXIT_GATE`, the FSM asserts the corresponding counter enable. Occupancy changes once at the rising edge that enters `UPDATE_ENTRY` or `UPDATE_EXIT`. In the update state, `display_update` is high while the new count and full/available indicators are already available.
+- During `OPEN_BOTH_GATES`, both counter enables are asserted. The counter explicitly holds its value because one entry and one exit give zero net occupancy change. `display_update` is asserted in `UPDATE_BOTH`.
 - An invalid ticket, incomplete payment, or an exit request while empty enters `ERROR` for one cycle and raises `alarm`.
 - An entry request while full enters `PARKING_FULL` for one cycle, keeps the entrance gate closed, and raises `alarm`.
-- If `car_in` and `car_out` are asserted simultaneously, exit has priority. This arbitration choice avoids opening both barriers together and is tested in TC9. The entry request is not queued: it must remain asserted or be retried when the controller returns to `IDLE`. An empty-lot or unpaid exit still takes priority and produces `ERROR`; there is no automatic fallback to entry.
+- If `car_in` and `car_out` are asserted simultaneously, the request enters `CHECK_BOTH`. When the lot is not empty, the ticket is valid, and payment is complete, both gates open and the occupancy remains unchanged. An empty lot, invalid ticket, or incomplete payment sends the combined request to `ERROR` and keeps both gates closed.
 - The counter saturates at 0 and 10, so invalid requests cannot cause underflow or overflow.
 
 The PDF does not prescribe reset polarity, arbitration, request queuing, gate-open duration, or exact display-update timing. These are implementation assumptions, not additional lecturer requirements. Here `display_update` is a one-cycle strobe that accompanies the updated occupancy value.
@@ -41,7 +43,8 @@ The PDF does not prescribe reset polarity, arbitration, request queuing, gate-op
 
 | Current state | Condition | Next state | Main output/action |
 |---|---|---|---|
-| `IDLE` | `car_out=1` | `CHECK_EXIT` | Exit priority |
+| `IDLE` | `car_in=1`, `car_out=1` | `CHECK_BOTH` | Begin simultaneous request check |
+| `IDLE` | `car_in=0`, `car_out=1` | `CHECK_EXIT` | Begin exit check |
 | `IDLE` | `car_out=0`, `car_in=1` | `CHECK_ENTRY` | Begin entry check |
 | `IDLE` | No request | `IDLE` | Gates closed |
 | `CHECK_ENTRY` | Lot full | `PARKING_FULL` | Reject entry |
@@ -53,6 +56,10 @@ The PDF does not prescribe reset polarity, arbitration, request queuing, gate-op
 | `CHECK_EXIT` | Occupied and payment complete | `OPEN_EXIT_GATE` | Accept exit |
 | `OPEN_EXIT_GATE` | Always | `UPDATE_EXIT` | `gate_out=1`; decrement at next edge |
 | `UPDATE_EXIT` | Always | `IDLE` | Present new count and update display |
+| `CHECK_BOTH` | Empty lot, invalid ticket, or incomplete payment | `ERROR` | Reject combined request |
+| `CHECK_BOTH` | Occupied lot, valid ticket, and completed payment | `OPEN_BOTH_GATES` | Accept both movements |
+| `OPEN_BOTH_GATES` | Always | `UPDATE_BOTH` | Open both gates; assert both count enables |
+| `UPDATE_BOTH` | Always | `IDLE` | Preserve count and update display |
 | `PARKING_FULL` | Always | `IDLE` | `alarm=1` |
 | `ERROR` | Always | `IDLE` | `alarm=1` |
 
@@ -69,6 +76,9 @@ State encoding for waveform analysis:
 | 6 | `UPDATE_EXIT` |
 | 7 | `PARKING_FULL` |
 | 8 | `ERROR` |
+| 9 | `CHECK_BOTH` |
+| 10 | `OPEN_BOTH_GATES` |
+| 11 | `UPDATE_BOTH` |
 
 ## 5. Testbench coverage
 
@@ -82,12 +92,12 @@ The self-checking `tb_smart_parking.sv` verifies:
 6. TC6 - One vehicle exits.
 7. TC7 - Multiple vehicles exit.
 8. TC8 - A vehicle attempts to exit while the parking lot is empty.
-9. TC9 - Simultaneous entry and exit, using the documented exit-priority policy.
+9. TC9 - Simultaneous entry and exit; both gates open and occupancy remains unchanged.
 10. TC10 - Invalid ticket.
 11. TC11 - Asynchronous reset while the entry gate is open, starting with two vehicles; verifies immediate counter clearing and no delayed entry after release.
 12. TC12 - Continuous valid entry/exit traffic.
 
-Additional checks cover an unpaid exit from an occupied lot and a successful paid retry. A continuous monitor checks state/count range, unknown values, gate exclusivity and state decoding, alarm/display strobes, and full/available indications after each rising edge. Directed checks verify count and one-cycle control timing. These are simulation checks, not exhaustive formal verification; a two-state simulator cannot establish four-state X/Z behavior.
+Additional checks cover an unpaid exit from an occupied lot and a successful paid retry. A continuous monitor checks state/count range, unknown values, legal gate and counter-enable decoding, alarm/display strobes, and full/available indications after each rising edge. Directed checks verify count and one-cycle control timing. These are simulation checks, not exhaustive formal verification; a two-state simulator cannot establish four-state X/Z behavior.
 
 The testbench generates `smart_parking.vcd`, tracks completion of all 12 required scenarios, prints a pass/fail summary, and calls `$fatal` if any check fails. A watchdog aborts a stalled run. The pass count counts individual assertions, not test cases.
 
@@ -134,12 +144,21 @@ For an accepted entry with initial occupancy `N`, values after successive rising
 
 An accepted exit follows the same timing using exit states and `N - 1`. Reset can interrupt either sequence between clock edges.
 
+For a valid simultaneous request with initial occupancy `N > 0`:
+
+| Edge | State | `gate_in` | `gate_out` | `display_update` | Occupancy |
+|---|---|---:|---:|---:|---:|
+| Request sampled | `CHECK_BOTH` | 0 | 0 | 0 | N |
+| Requests accepted | `OPEN_BOTH_GATES` | 1 | 1 | 0 | N |
+| Gate cycle ends | `UPDATE_BOTH` | 0 | 0 | 1 | N |
+| Return to waiting | `IDLE` | 0 | 0 | 0 | N |
+
 ## 8. Report requirements still to complete
 
 The PDF also requires simulation in EDA Playground, waveform explanations, and evaluation of **testability and sustainable design considerations**. The code and a passing console summary alone do not complete the report.
 
 - System specification/problem analysis (10 marks): describe the campus-parking problem, interfaces, capacity, and the assumptions above.
-- FSM design (30 marks): provide a state diagram, transition/output table, arbitration rationale, and error/reset behavior.
+- FSM design (30 marks): provide a state diagram, transition/output table, simultaneous-request rationale, and error/reset behavior.
 - RTL design (30 marks): explain the four synthesizable modules and their connections.
 - Testbench development (20 marks): map TC1-TC12 to stimulus and expected results, and discuss controllability through inputs/reset and observability through outputs, occupancy, and state debug signals.
 - Simulation/waveform analysis (10 marks): provide EDA Playground results and annotated waveforms with the seven explanations listed on page 3 of the PDF.
@@ -153,16 +172,17 @@ The stated submission deadline is **5:00 pm, Friday, 18 September 2026**, by ema
 - `tb_smart_parking.sv`: self-checking testbench for the 12 required cases.
 - `assignment_guideline.md`: requirements, assumptions, FSM summary, and simulation instructions.
 
-## 10. Current review status (8 September 2026)
+## 10. Current review status (11 September 2026)
 
 Baseline reviewed: commit `edb529987a6199b4a1a0a6b4abf907e96295f79c`.
 
 | Check | Result |
 |---|---|
-| Required interfaces, four modules, nine states, capacity and asynchronous reset | Present in RTL |
+| Required interfaces, four modules, nine required states, capacity and asynchronous reset | Present in RTL |
+| Simultaneous entry and exit | Three additional states open both gates and explicitly preserve occupancy |
 | Occupancy/display timing | Revised so the new count is available while `display_update` is high |
 | Required testbench coverage | TC1-TC12 are present with directed checks and a continuous invariant monitor |
 | EDA Playground simulation and report waveforms | Pending; collect these before treating the revised code as verified |
 | Synthesis, physical timing and power measurements | Not performed |
 
-The review branch contains the proposed RTL and testbench changes. Merge it into `main` only after the revised files pass the required EDA Playground simulation.
+The feature branch contains the proposed RTL, testbench, and documentation changes. Merge it into `main` only after the revised files pass the required EDA Playground simulation.
