@@ -34,7 +34,8 @@ Sequential blocks use `always_ff` with nonblocking assignments. Combinational bl
 - During `OPEN_BOTH_GATES`, both counter enables are asserted. The counter explicitly holds its value because one entry and one exit give zero net occupancy change. `display_update` is asserted in `UPDATE_BOTH`.
 - An invalid ticket, incomplete payment, or an exit request while empty enters `ERROR` for one cycle and raises `alarm`.
 - An entry request while full enters `PARKING_FULL` for one cycle, keeps the entrance gate closed, and raises `alarm`.
-- If `car_in` and `car_out` are asserted simultaneously, the request enters `CHECK_BOTH`. When the lot is not empty, the ticket is valid, and payment is complete, both gates open and the occupancy remains unchanged. An empty lot, invalid ticket, or incomplete payment sends the combined request to `ERROR` and keeps both gates closed.
+- If `car_in` and `car_out` are asserted simultaneously, the request enters `CHECK_BOTH` and validates entry and exit independently. If both movements are valid, both gates open and occupancy is unchanged. A valid entry may proceed alone when the exit is unpaid or the lot is empty, provided the lot is not full. A paid exit from an occupied lot may proceed alone when the entry ticket is invalid. Other combinations enter `ERROR`.
+- Reusing the normal entry and exit states for partially accepted simultaneous requests avoids adding states. Consequently, these accepted paths do not assert `alarm`; the rejected gate simply remains closed.
 - The counter saturates at 0 and 10, so invalid requests cannot cause underflow or overflow.
 
 The PDF does not prescribe reset polarity, arbitration, request queuing, gate-open duration, or exact display-update timing. These are implementation assumptions, not additional lecturer requirements. Here `display_update` is a one-cycle strobe that accompanies the updated occupancy value.
@@ -56,8 +57,10 @@ The PDF does not prescribe reset polarity, arbitration, request queuing, gate-op
 | `CHECK_EXIT` | Occupied and payment complete | `OPEN_EXIT_GATE` | Accept exit |
 | `OPEN_EXIT_GATE` | Always | `UPDATE_EXIT` | `gate_out=1`; decrement at next edge |
 | `UPDATE_EXIT` | Always | `IDLE` | Present new count and update display |
-| `CHECK_BOTH` | Empty lot, invalid ticket, or incomplete payment | `ERROR` | Reject combined request |
-| `CHECK_BOTH` | Occupied lot, valid ticket, and completed payment | `OPEN_BOTH_GATES` | Accept both movements |
+| `CHECK_BOTH` | Occupied lot, valid ticket, completed payment | `OPEN_BOTH_GATES` | Accept both movements; count unchanged |
+| `CHECK_BOTH` | Valid ticket, space available, and exit unpaid or lot empty | `OPEN_ENTRY_GATE` | Accept entry only; block exit |
+| `CHECK_BOTH` | Occupied lot, invalid ticket, completed payment | `OPEN_EXIT_GATE` | Block entry; accept exit only |
+| `CHECK_BOTH` | Any other combination | `ERROR` | Reject both movements |
 | `OPEN_BOTH_GATES` | Always | `UPDATE_BOTH` | Open both gates; assert both count enables |
 | `UPDATE_BOTH` | Always | `IDLE` | Preserve count and update display |
 | `PARKING_FULL` | Always | `IDLE` | `alarm=1` |
@@ -97,7 +100,7 @@ The self-checking `tb_smart_parking.sv` verifies:
 11. TC11 - Asynchronous reset while the entry gate is open, starting with two vehicles; verifies immediate counter clearing and no delayed entry after release.
 12. TC12 - Continuous valid entry/exit traffic.
 
-Additional checks cover an unpaid exit from an occupied lot and a successful paid retry. A continuous monitor checks state/count range, unknown values, legal gate and counter-enable decoding, alarm/display strobes, and full/available indications after each rising edge. Directed checks verify count and one-cycle control timing. These are simulation checks, not exhaustive formal verification; a two-state simulator cannot establish four-state X/Z behavior.
+Additional checks cover an unpaid exit from an occupied lot, a successful paid retry, independent acceptance of entry-only and exit-only simultaneous requests, and rejection of an entry-only request at full capacity. A continuous monitor checks state/count range, unknown values, legal gate and counter-enable decoding, alarm/display strobes, and full/available indications after each rising edge. Directed checks verify count and one-cycle control timing. These are simulation checks, not exhaustive formal verification; a two-state simulator cannot establish four-state X/Z behavior.
 
 The testbench generates `smart_parking.vcd`, tracks completion of all 12 required scenarios, prints a pass/fail summary, and calls `$fatal` if any check fails. A watchdog aborts a stalled run. The pass count counts individual assertions, not test cases.
 
@@ -179,7 +182,7 @@ Baseline reviewed: commit `edb529987a6199b4a1a0a6b4abf907e96295f79c`.
 | Check | Result |
 |---|---|
 | Required interfaces, four modules, nine required states, capacity and asynchronous reset | Present in RTL |
-| Simultaneous entry and exit | Three additional states open both gates and explicitly preserve occupancy |
+| Simultaneous entry and exit | Valid movements are handled independently; both-valid requests preserve occupancy, while entry-only paths are capacity-guarded |
 | Occupancy/display timing | Revised so the new count is available while `display_update` is high |
 | Required testbench coverage | TC1-TC12 are present with directed checks and a continuous invariant monitor |
 | EDA Playground simulation and report waveforms | Pending; collect these before treating the revised code as verified |
